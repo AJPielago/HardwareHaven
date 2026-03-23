@@ -1,0 +1,5 @@
+[dotenv@17.3.1] injecting env (16) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+SQLite database initialized
+Server running on http://0.0.0.0:5000
+  -> http://192.168.56.1:5000
+  -> http://192.168.2.194:5000

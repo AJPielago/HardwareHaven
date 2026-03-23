@@ -1,18 +1,24 @@
 {
   "expo": {
     "name": "ShopApp",
+    "owner": "alexj.p",
     "slug": "ShopApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": [
+      "shopapp",
+      "com.googleusercontent.apps.865209207153-tc98eobq0ujacjoi98n0m5qom7o5ipfe"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shopapp.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,10 +26,39 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "com.shopapp.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ShopApp to access your camera for taking product and profile photos."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ShopApp to access your photos for uploading images."
+        }
+      ],
+      "expo-sqlite",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f415cfa4-8eed-4377-bff9-c5a34a13721a"
+      }
     }
   }
 }

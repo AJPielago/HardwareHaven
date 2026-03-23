@@ -1,0 +1,109 @@
+const User = require('../models/User');
+const { verifyFirebaseToken } = require('../utils/firebaseAdmin');
+const db = require('../database');
+
+const decodeJwtPayload = (token) => {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+    const json = Buffer.from(parts[1], 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+module.exports = async (req, res, next) => {
+  const authHeader = req.header('Authorization');
+  if (!authHeader) return res.status(401).json({ message: 'No token, authorization denied' });
+
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+
+  try {
+    const decoded = await verifyFirebaseToken(token, false);
+    const normalizedEmail = decoded.email?.toLowerCase();
+
+    if (!normalizedEmail) {
+      return res.status(401).json({ message: 'Firebase token must contain an email' });
+    }
+
+    let user = await User.findOne({ $or: [{ firebaseUid: decoded.uid }, { email: normalizedEmail }] });
+    if (!user) {
+      user = await User.create({
+        firebaseUid: decoded.uid,
+        name: decoded.name || normalizedEmail.split('@')[0] || 'User',
+        email: normalizedEmail,
+        avatar: decoded.picture || '',
+        provider: 'firebase',
+        role: 'user',
+      });
+    } else if (!user.firebaseUid) {
+      user.firebaseUid = decoded.uid;
+      user.provider = 'firebase';
+      await user.save();
+    }
+
+    if (user.isActive === false) {
+      return res.status(403).json({
+        message: 'Your account has been deactivated. Please contact support.',
+        reason: user.deactivationReason || '',
+      });
+    }
+
+    db.prepare(`
+      INSERT INTO users (id, name, email, avatar, phone, address, provider, providerId, role, isActive, deactivatedAt, deactivationReason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        email = excluded.email,
+        avatar = excluded.avatar,
+        phone = excluded.phone,
+        address = excluded.address,
+        provider = excluded.provider,
+        providerId = excluded.providerId,
+        role = excluded.role,
+        isActive = excluded.isActive,
+        deactivatedAt = excluded.deactivatedAt,
+        deactivationReason = excluded.deactivationReason,
+        updatedAt = datetime('now')
+    `).run(
+      String(user._id),
+      user.name || decoded.name || normalizedEmail.split('@')[0] || 'User',
+      normalizedEmail,
+      user.avatar || decoded.picture || '',
+      user.phone || '',
+      user.address || '',
+      user.provider || 'firebase',
+      user.firebaseUid || decoded.uid || '',
+      user.role || 'user',
+      user.isActive === false ? 0 : 1,
+      user.deactivatedAt ? new Date(user.deactivatedAt).toISOString() : null,
+      user.deactivationReason || ''
+    );
+
+    req.firebaseUser = decoded;
+    req.user = {
+      id: String(user._id),
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive !== false,
+      name: user.name,
+      firebaseUid: user.firebaseUid,
+    };
+
+    next();
+  } catch (err) {
+    console.error('[Auth Middleware] Firebase token verification failed:', err?.code, err?.message);
+
+    const tokenClaims = decodeJwtPayload(token);
+    const payload = {
+      message: 'Firebase token is not valid',
+      reason: err?.code || err?.message,
+      expectedProjectId: process.env.FIREBASE_PROJECT_ID || null,
+      tokenAud: tokenClaims?.aud || null,
+      tokenIss: tokenClaims?.iss || null,
+    };
+
+    res.status(401).json(payload);
+  }
+};
