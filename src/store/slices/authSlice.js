@@ -219,7 +219,7 @@ export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWi
           unsubscribe();
           resolve(user);
         });
-      }), 10000, 'Timed out waiting for Firebase auth state');
+      }), 15000, 'Timed out waiting for Firebase auth state');
     } catch (authStateErr) {
       // If Firebase already has a current user, proceed rather than blocking app entry.
       if (!auth.currentUser) {
@@ -236,11 +236,24 @@ export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWi
     const firebaseUser = auth.currentUser;
     const fallbackUser = toFallbackUserFromFirebase(firebaseUser);
 
+    // Wake up the backend first (Render.com free tier sleeps after inactivity)
+    console.log('[CheckAuth] Pinging backend health endpoint to wake server...');
+    try {
+      await withTimeout(
+        api.get('/health').catch(() => {}),
+        60000,
+        'Backend health ping timed out'
+      );
+      console.log('[CheckAuth] Backend is awake');
+    } catch {
+      console.warn('[CheckAuth] Health ping timed out, proceeding anyway...');
+    }
+
     console.log('[CheckAuth] Firebase user exists, calling /auth/profile...');
     try {
       const { data } = await withTimeout(
         api.get('/auth/profile'),
-        15000,
+        60000,
         'Timed out fetching /auth/profile'
       );
       console.log('[CheckAuth] Profile fetched successfully');
@@ -253,13 +266,13 @@ export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWi
 
         await withTimeout(
           api.post('/auth/sync', syncPayload),
-          10000,
+          30000,
           'Timed out posting /auth/sync'
         );
 
         const { data } = await withTimeout(
           api.get('/auth/profile'),
-          10000,
+          30000,
           'Timed out fetching /auth/profile after sync'
         );
 
