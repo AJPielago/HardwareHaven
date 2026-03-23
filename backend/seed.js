@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { connectMongo } = require('./mongo');
 const User = require('./models/User');
 const Product = require('./models/Product');

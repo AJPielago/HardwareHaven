@@ -1,5 +1,5 @@
-const { v4: uuidv4 } = require('uuid');
-const db = require('../database');
+const Product = require('../models/Product');
+const { formatProduct } = require('../utils/formatters');
 
 const ALLOWED_CATEGORIES = [
   'Hand Tools',
@@ -21,110 +21,93 @@ const normalizeCategory = (value) => {
 
 const getUploadedImageUrl = (file) => file?.path || file?.secure_url || file?.url || '';
 
-function formatProduct(product) {
-  return { ...product, _id: product.id };
-}
+const toSort = (sort) => {
+  if (sort === 'price_asc') return { price: 1 };
+  if (sort === 'price_desc') return { price: -1 };
+  if (sort === 'rating') return { averageRating: -1 };
+  if (sort === 'name') return { name: 1 };
+  return { createdAt: -1 };
+};
 
-exports.getProducts = (req, res) => {
+const toProductPayload = (productDoc) => {
+  const formatted = formatProduct(productDoc);
+  const image = formatted.image || '';
+  return {
+    ...formatted,
+    images: image ? [image] : [],
+    image,
+  };
+};
+
+exports.getProducts = async (req, res) => {
   try {
     const { search, category, minPrice, maxPrice, sort, page = 1, limit = 20 } = req.query;
-    const conditions = ['isActive = 1'];
-    const params = [];
+    const query = { isActive: true };
 
     if (search) {
-      conditions.push('(name LIKE ? OR description LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`);
+      query.$or = [
+        { name: { $regex: String(search), $options: 'i' } },
+        { description: { $regex: String(search), $options: 'i' } },
+      ];
     }
+
     if (category) {
-      conditions.push('category = ? COLLATE NOCASE');
-      params.push(category);
-    }
-    if (minPrice) {
-      conditions.push('price >= ?');
-      params.push(Number(minPrice));
-    }
-    if (maxPrice) {
-      conditions.push('price <= ?');
-      params.push(Number(maxPrice));
+      query.category = { $regex: `^${String(category).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      query.price = {};
+      if (minPrice !== undefined) query.price.$gte = Number(minPrice);
+      if (maxPrice !== undefined) query.price.$lte = Number(maxPrice);
+    }
 
-    let orderBy = 'ORDER BY createdAt DESC';
-    if (sort === 'price_asc') orderBy = 'ORDER BY price ASC';
-    if (sort === 'price_desc') orderBy = 'ORDER BY price DESC';
-    if (sort === 'rating') orderBy = 'ORDER BY averageRating DESC';
-    if (sort === 'name') orderBy = 'ORDER BY name ASC';
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const limitNum = Math.max(Number(limit) || 20, 1);
+    const skip = (pageNum - 1) * limitNum;
 
-    const offset = (Number(page) - 1) * Number(limit);
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .sort(toSort(sort))
+        .skip(skip)
+        .limit(limitNum)
+        .populate('createdBy', 'name')
+        .lean(),
+      Product.countDocuments(query),
+    ]);
 
-    const products = db.prepare(`SELECT * FROM products ${where} ${orderBy} LIMIT ? OFFSET ?`).all(...params, Number(limit), offset);
-    const total = db.prepare(`SELECT COUNT(*) as count FROM products ${where}`).get(...params).count;
-
-    const shaped = products.map((p) => {
-      // normalize images stored as JSON array or single string
-      let images = [];
-      try {
-        if (p.image) {
-          const parsed = JSON.parse(p.image);
-          if (Array.isArray(parsed)) images = parsed.filter(Boolean);
-          else if (typeof parsed === 'string' && parsed) images = [parsed];
-        }
-      } catch (e) {
-        if (p.image) images = [p.image];
-      }
-      return { ...formatProduct(p), images, image: images[0] || '' };
+    res.json({
+      products: products.map(toProductPayload),
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
     });
-
-    res.json({ products: shaped, total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-exports.getCategories = (req, res) => {
+exports.getCategories = async (_req, res) => {
   try {
-    const rows = db.prepare('SELECT DISTINCT category FROM products WHERE isActive = 1 ORDER BY category').all();
-    res.json(rows.map((row) => row.category));
+    const categories = await Product.distinct('category');
+    categories.sort((a, b) => String(a).localeCompare(String(b)));
+    res.json(categories);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-exports.getProductById = (req, res) => {
+exports.getProductById = async (req, res) => {
   try {
-    const product = db.prepare(`
-      SELECT p.*, u.name as createdByName
-      FROM products p
-      LEFT JOIN users u ON p.createdBy = u.id
-      WHERE p.id = ? AND p.isActive = 1
-    `).get(req.params.id);
+    const product = await Product.findOne({ _id: req.params.id, isActive: true }).populate('createdBy', 'name').lean();
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    product.createdBy = product.createdBy ? { _id: product.createdBy, name: product.createdByName } : null;
-    delete product.createdByName;
-
-    // normalize images
-    let images = [];
-    try {
-      if (product.image) {
-        const parsed = JSON.parse(product.image);
-        if (Array.isArray(parsed)) images = parsed.filter(Boolean);
-        else if (typeof parsed === 'string' && parsed) images = [parsed];
-      }
-    } catch (e) {
-      if (product.image) images = [product.image];
-    }
-    const formatted = formatProduct(product);
-    formatted.images = images;
-    formatted.image = images[0] || '';
-    res.json(formatted);
+    res.json(toProductPayload(product));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-exports.createProduct = (req, res) => {
+exports.createProduct = async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
 
@@ -132,13 +115,11 @@ exports.createProduct = (req, res) => {
     const normalizedCategory = normalizeCategory(category);
     const numericPrice = Number(price);
     const numericStock = Number(stock);
-    const serviceMode = isService === 'true';
+    const serviceMode = isService === true || isService === 'true';
 
     if (!String(name || '').trim()) return res.status(400).json({ message: 'Name is required' });
     if (!String(description || '').trim()) return res.status(400).json({ message: 'Description is required' });
-    if (!normalizedCategory) {
-      return res.status(400).json({ message: 'Invalid category selected' });
-    }
+    if (!normalizedCategory) return res.status(400).json({ message: 'Invalid category selected' });
     if (!Number.isFinite(numericPrice) || numericPrice < 0) {
       return res.status(400).json({ message: 'Price must be a valid non-negative number' });
     }
@@ -148,117 +129,105 @@ exports.createProduct = (req, res) => {
       }
     }
 
-    const id = uuidv4();
     let files = req.files || [];
-    // multer.fields returns an object { fieldname: [files] }, while .array returns an array
     if (!Array.isArray(files) && typeof files === 'object') {
       files = Object.values(files).flat();
     }
     const images = (files || []).map(getUploadedImageUrl).filter(Boolean);
-    const imageToStore = JSON.stringify(images);
 
-    db.prepare(`
-      INSERT INTO products (id, name, description, price, category, stock, isService, image, createdBy)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      String(name).trim(),
-      String(description).trim(),
-      numericPrice,
-      normalizedCategory,
-      serviceMode ? 0 : numericStock,
-      serviceMode ? 1 : 0,
-      imageToStore,
-      req.user.id
-    );
+    const created = await Product.create({
+      name: String(name).trim(),
+      description: String(description).trim(),
+      price: numericPrice,
+      category: normalizedCategory,
+      stock: serviceMode ? 0 : numericStock,
+      isService: serviceMode,
+      image: images[0] || '',
+      createdBy: req.user.id,
+    });
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
-    // shape images for response
-    let imgs = [];
-    try { imgs = JSON.parse(product.image || '[]'); } catch (e) { if (product.image) imgs = [product.image]; }
-    const formatted = formatProduct(product);
-    formatted.images = imgs;
-    formatted.image = imgs[0] || '';
-    res.status(201).json(formatted);
+    const product = await Product.findById(created._id).populate('createdBy', 'name').lean();
+    res.status(201).json(toProductPayload(product));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-exports.updateProduct = (req, res) => {
+exports.updateProduct = async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
 
-    const sets = [];
-    const params = [];
-    if (req.body.name) {
+    const update = {};
+
+    if (req.body.name !== undefined) {
       const nextName = String(req.body.name).trim();
       if (!nextName) return res.status(400).json({ message: 'Name cannot be empty' });
-      sets.push('name = ?');
-      params.push(nextName);
+      update.name = nextName;
     }
-    if (req.body.description) {
+
+    if (req.body.description !== undefined) {
       const nextDescription = String(req.body.description).trim();
       if (!nextDescription) return res.status(400).json({ message: 'Description cannot be empty' });
-      sets.push('description = ?');
-      params.push(nextDescription);
+      update.description = nextDescription;
     }
+
     if (req.body.price !== undefined) {
       const nextPrice = Number(req.body.price);
       if (!Number.isFinite(nextPrice) || nextPrice < 0) {
         return res.status(400).json({ message: 'Price must be a valid non-negative number' });
       }
-      sets.push('price = ?');
-      params.push(nextPrice);
+      update.price = nextPrice;
     }
-    if (req.body.category) {
+
+    if (req.body.category !== undefined) {
       const nextCategory = normalizeCategory(req.body.category);
       if (!nextCategory) return res.status(400).json({ message: 'Invalid category selected' });
-      sets.push('category = ?');
-      params.push(nextCategory);
+      update.category = nextCategory;
     }
+
     if (req.body.stock !== undefined) {
       const nextStock = Number(req.body.stock);
       if (!Number.isFinite(nextStock) || nextStock < 0 || !Number.isInteger(nextStock)) {
         return res.status(400).json({ message: 'Stock must be a valid non-negative whole number' });
       }
-      sets.push('stock = ?');
-      params.push(nextStock);
+      update.stock = nextStock;
     }
+
+    if (req.body.isService !== undefined) {
+      update.isService = req.body.isService === true || req.body.isService === 'true';
+      if (update.isService) update.stock = 0;
+    }
+
     if (req.files) {
       let incoming = req.files;
       if (!Array.isArray(incoming) && typeof incoming === 'object') incoming = Object.values(incoming).flat();
-      if (incoming && incoming.length) {
-        sets.push('image = ?');
-        params.push(JSON.stringify(incoming.map(getUploadedImageUrl).filter(Boolean)));
+      const images = (incoming || []).map(getUploadedImageUrl).filter(Boolean);
+      if (images.length > 0) {
+        update.image = images[0];
       }
     }
-    sets.push("updatedAt = datetime('now')");
-    params.push(req.params.id);
 
-    if (sets.length === 1) return res.status(400).json({ message: 'No fields to update' });
+    if (!Object.keys(update).length) return res.status(400).json({ message: 'No fields to update' });
 
-    db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    const product = await Product.findByIdAndUpdate(req.params.id, { $set: update }, { new: true })
+      .populate('createdBy', 'name')
+      .lean();
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    let imgs = [];
-    try { imgs = JSON.parse(product.image || '[]'); } catch (e) { if (product.image) imgs = [product.image]; }
-    const formatted = formatProduct(product);
-    formatted.images = imgs;
-    formatted.image = imgs[0] || '';
-    res.json(formatted);
+
+    res.json(toProductPayload(product));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-exports.deleteProduct = (req, res) => {
+exports.deleteProduct = async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
 
-    const result = db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ message: 'Product not found' });
+    const deleted = await Product.findByIdAndDelete(req.params.id).lean();
+    if (!deleted) return res.status(404).json({ message: 'Product not found' });
+
     res.json({ message: 'Product deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });

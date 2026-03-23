@@ -1,67 +1,106 @@
-const db = require('../database');
+const User = require('../models/User');
+const Product = require('../models/Product');
+const Order = require('../models/Order');
 
-exports.getStats = (req, res) => {
+exports.getStats = async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
 
-    const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users WHERE role = ?').get('user').count;
-    const totalProducts = db.prepare('SELECT COUNT(*) as count FROM products').get().count;
-    const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const revenueResult = db.prepare("SELECT COALESCE(SUM(totalAmount), 0) as total FROM orders WHERE status != 'cancelled'").get();
-    const totalRevenue = revenueResult.total;
+    const [
+      totalUsers,
+      totalProducts,
+      totalOrders,
+      pendingOrders,
+      newUsersThisWeek,
+      revenueAgg,
+      ordersByStatus,
+      recentOrdersRaw,
+      topProducts,
+      lowStock,
+      dailyOrders,
+    ] = await Promise.all([
+      User.countDocuments({ role: 'user' }),
+      Product.countDocuments({}),
+      Order.countDocuments({}),
+      Order.countDocuments({ status: 'pending' }),
+      User.countDocuments({ role: 'user', createdAt: { $gte: sevenDaysAgo } }),
+      Order.aggregate([
+        { $match: { status: { $ne: 'cancelled' } } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+      ]),
+      Order.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+        { $project: { _id: 0, status: '$_id', count: 1 } },
+      ]),
+      Order.find({})
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .populate('userId', 'name email')
+        .lean(),
+      Order.aggregate([
+        { $match: { status: { $ne: 'cancelled' } } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.productId',
+            name: { $first: '$items.name' },
+            totalSold: { $sum: '$items.quantity' },
+            totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          },
+        },
+        { $sort: { totalSold: -1 } },
+        { $limit: 5 },
+        { $project: { _id: 0, productId: '$_id', name: 1, totalSold: 1, totalRevenue: 1 } },
+      ]),
+      Product.find({ isService: false, stock: { $lte: 10 } }, { name: 1, stock: 1, category: 1 })
+        .sort({ stock: 1 })
+        .limit(5)
+        .lean(),
+      Order.aggregate([
+        { $match: { createdAt: { $gte: sevenDaysAgo } } },
+        {
+          $group: {
+            _id: {
+              y: { $year: '$createdAt' },
+              m: { $month: '$createdAt' },
+              d: { $dayOfMonth: '$createdAt' },
+            },
+            count: { $sum: 1 },
+            revenue: { $sum: '$totalAmount' },
+          },
+        },
+        { $sort: { '_id.y': -1, '_id.m': -1, '_id.d': -1 } },
+      ]),
+    ]);
 
-    const ordersByStatus = db.prepare(`
-      SELECT status, COUNT(*) as count FROM orders GROUP BY status
-    `).all();
+    const totalRevenue = revenueAgg[0]?.total || 0;
 
-    const recentOrders = db.prepare(`
-      SELECT o.*, u.name as userName, u.email as userEmail
-      FROM orders o
-      JOIN users u ON o.userId = u.id
-      ORDER BY o.createdAt DESC LIMIT 5
-    `).all().map((order) => {
-      const itemCount = db.prepare('SELECT COUNT(*) as count FROM order_items WHERE orderId = ?').get(order.id).count;
-      return {
-        _id: order.id,
-        user: { name: order.userName, email: order.userEmail },
-        totalAmount: order.totalAmount,
-        status: order.status,
-        itemCount,
-        createdAt: order.createdAt,
-      };
-    });
+    const recentOrders = recentOrdersRaw.map((order) => ({
+      _id: String(order._id),
+      user: {
+        name: order.userId?.name,
+        email: order.userId?.email,
+      },
+      totalAmount: order.totalAmount,
+      status: order.status,
+      itemCount: (order.items || []).length,
+      createdAt: order.createdAt,
+    }));
 
-    const topProducts = db.prepare(`
-      SELECT oi.productId, oi.name, SUM(oi.quantity) as totalSold, SUM(oi.price * oi.quantity) as totalRevenue
-      FROM order_items oi
-      JOIN orders o ON oi.orderId = o.id
-      WHERE o.status != 'cancelled'
-      GROUP BY oi.productId
-      ORDER BY totalSold DESC
-      LIMIT 5
-    `).all();
+    const normalizedLowStock = lowStock.map((item) => ({
+      _id: String(item._id),
+      name: item.name,
+      stock: item.stock,
+      category: item.category,
+    }));
 
-    const lowStock = db.prepare(`
-      SELECT id as _id, name, stock, category FROM products
-      WHERE isService = 0 AND stock <= 10
-      ORDER BY stock ASC LIMIT 5
-    `).all();
-
-    const dailyOrders = db.prepare(`
-      SELECT DATE(createdAt) as date, COUNT(*) as count, COALESCE(SUM(totalAmount), 0) as revenue
-      FROM orders
-      WHERE createdAt >= datetime('now', '-7 days')
-      GROUP BY DATE(createdAt)
-      ORDER BY date DESC
-    `).all();
-
-    const newUsersThisWeek = db.prepare(`
-      SELECT COUNT(*) as count FROM users
-      WHERE createdAt >= datetime('now', '-7 days') AND role = 'user'
-    `).get().count;
-
-    const pendingOrders = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = 'pending'").get().count;
+    const normalizedDailyOrders = dailyOrders.map((entry) => ({
+      date: `${entry._id.y}-${String(entry._id.m).padStart(2, '0')}-${String(entry._id.d).padStart(2, '0')}`,
+      count: entry.count,
+      revenue: entry.revenue,
+    }));
 
     res.json({
       totalUsers,
@@ -73,8 +112,8 @@ exports.getStats = (req, res) => {
       ordersByStatus,
       recentOrders,
       topProducts,
-      lowStock,
-      dailyOrders,
+      lowStock: normalizedLowStock,
+      dailyOrders: normalizedDailyOrders,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

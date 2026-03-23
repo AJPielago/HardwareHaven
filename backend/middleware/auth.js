@@ -1,6 +1,5 @@
 const User = require('../models/User');
 const { verifyFirebaseToken } = require('../utils/firebaseAdmin');
-const db = require('../database');
 
 const decodeJwtPayload = (token) => {
   try {
@@ -81,37 +80,6 @@ module.exports = async (req, res, next) => {
         reason: user.deactivationReason || '',
       });
     }
-
-    db.prepare(`
-      INSERT INTO users (id, name, email, avatar, phone, address, provider, providerId, role, isActive, deactivatedAt, deactivationReason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        email = excluded.email,
-        avatar = excluded.avatar,
-        phone = excluded.phone,
-        address = excluded.address,
-        provider = excluded.provider,
-        providerId = excluded.providerId,
-        role = excluded.role,
-        isActive = excluded.isActive,
-        deactivatedAt = excluded.deactivatedAt,
-        deactivationReason = excluded.deactivationReason,
-        updatedAt = datetime('now')
-    `).run(
-      String(user._id),
-      user.name || decoded.name || normalizedEmail.split('@')[0] || 'User',
-      normalizedEmail,
-      user.avatar || decoded.picture || '',
-      user.phone || '',
-      user.address || '',
-      user.provider || 'firebase',
-      user.firebaseUid || decoded.uid || '',
-      user.role || 'user',
-      user.isActive === false ? 0 : 1,
-      user.deactivatedAt ? new Date(user.deactivatedAt).toISOString() : null,
-      user.deactivationReason || ''
-    );
 
     req.firebaseUser = decoded;
     req.user = {

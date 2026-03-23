@@ -4,7 +4,6 @@ const Notification = require('../models/Notification');
 const PushToken = require('../models/PushToken');
 const User = require('../models/User');
 const { toId, formatNotification } = require('../utils/formatters');
-const db = require('../database');
 
 const expo = new Expo();
 
@@ -17,43 +16,7 @@ exports.getNotifications = async (req, res) => {
       .limit(50)
       .lean();
 
-    const sqliteRows = db.prepare(
-      'SELECT id, userId, title, body, data, type, isRead, isBroadcast, createdAt, updatedAt FROM notifications WHERE userId = ? OR isBroadcast = 1 ORDER BY createdAt DESC LIMIT 50'
-    ).all(req.user.id);
-
-    const sqliteNotifications = sqliteRows.map((row) => {
-      let parsedData = {};
-      try {
-        parsedData = row.data ? JSON.parse(row.data) : {};
-      } catch (_) {
-        parsedData = {};
-      }
-
-      return {
-        _id: String(row.id),
-        user: row.userId ? String(row.userId) : null,
-        title: row.title,
-        body: row.body,
-        data: parsedData,
-        type: row.type || 'general',
-        isRead: !!row.isRead,
-        isBroadcast: !!row.isBroadcast,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      };
-    });
-
-    const mergedById = new Map();
-    for (const n of mongoNotifications.map(formatNotification)) mergedById.set(String(n._id), n);
-    for (const n of sqliteNotifications) {
-      if (!mergedById.has(String(n._id))) mergedById.set(String(n._id), n);
-    }
-
-    const merged = Array.from(mergedById.values()).sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-
-    res.json(merged.slice(0, 50));
+    res.json(mongoNotifications.map(formatNotification));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -62,44 +25,7 @@ exports.getNotifications = async (req, res) => {
 exports.markAsRead = async (req, res) => {
   try {
     const notification = await Notification.findById(req.params.id).lean();
-    if (!notification) {
-      const sqliteNotification = db
-        .prepare('SELECT id, userId, isBroadcast, isRead, title, body, data, type, createdAt, updatedAt FROM notifications WHERE id = ?')
-        .get(req.params.id);
-
-      if (!sqliteNotification) return res.status(404).json({ message: 'Notification not found' });
-
-      const isOwnerSqlite = String(sqliteNotification.userId || '') === req.user.id;
-      const isBroadcastSqlite = !!sqliteNotification.isBroadcast;
-      if (!isOwnerSqlite && !isBroadcastSqlite) {
-        return res.status(403).json({ message: 'Not authorized' });
-      }
-
-      db.prepare("UPDATE notifications SET isRead = 1, updatedAt = datetime('now') WHERE id = ?").run(req.params.id);
-      const updatedSqlite = db
-        .prepare('SELECT id, userId, title, body, data, type, isRead, isBroadcast, createdAt, updatedAt FROM notifications WHERE id = ?')
-        .get(req.params.id);
-
-      let parsedData = {};
-      try {
-        parsedData = updatedSqlite.data ? JSON.parse(updatedSqlite.data) : {};
-      } catch (_) {
-        parsedData = {};
-      }
-
-      return res.json({
-        _id: String(updatedSqlite.id),
-        user: updatedSqlite.userId ? String(updatedSqlite.userId) : null,
-        title: updatedSqlite.title,
-        body: updatedSqlite.body,
-        data: parsedData,
-        type: updatedSqlite.type || 'general',
-        isRead: !!updatedSqlite.isRead,
-        isBroadcast: !!updatedSqlite.isBroadcast,
-        createdAt: updatedSqlite.createdAt,
-        updatedAt: updatedSqlite.updatedAt,
-      });
-    }
+    if (!notification) return res.status(404).json({ message: 'Notification not found' });
 
     const isOwner = toId(notification.userId) === req.user.id;
     const isBroadcast = !!notification.isBroadcast;

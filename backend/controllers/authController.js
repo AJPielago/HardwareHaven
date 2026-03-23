@@ -1,44 +1,9 @@
 const User = require('../models/User');
 const PushToken = require('../models/PushToken');
-const db = require('../database');
 const { formatUser } = require('../utils/formatters');
 
 const getUploadedImageUrl = (file) => file?.path || file?.secure_url || file?.url || '';
-
-/** Keep SQLite users row aligned with Mongo (auth middleware also does this on each request). */
-function mirrorUserToSqlite(user) {
-  if (!user) return;
-  db.prepare(`
-    INSERT INTO users (id, name, email, avatar, phone, address, provider, providerId, role, isActive, deactivatedAt, deactivationReason)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      email = excluded.email,
-      avatar = excluded.avatar,
-      phone = excluded.phone,
-      address = excluded.address,
-      provider = excluded.provider,
-      providerId = excluded.providerId,
-      role = excluded.role,
-      isActive = excluded.isActive,
-      deactivatedAt = excluded.deactivatedAt,
-      deactivationReason = excluded.deactivationReason,
-      updatedAt = datetime('now')
-  `).run(
-    String(user._id),
-    user.name || '',
-    user.email || '',
-    user.avatar || '',
-    user.phone || '',
-    user.address || '',
-    user.provider || 'firebase',
-    user.firebaseUid || '',
-    user.role || 'user',
-    user.isActive === false ? 0 : 1,
-    user.deactivatedAt ? new Date(user.deactivatedAt).toISOString() : null,
-    user.deactivationReason || ''
-  );
-}
+const isExpoPushToken = (token) => /^ExponentPushToken\[[^\]]+\]$|^ExpoPushToken\[[^\]]+\]$/.test(String(token || ''));
 
 exports.syncUser = async (req, res) => {
   try {
@@ -54,11 +19,6 @@ exports.syncUser = async (req, res) => {
 
     await User.findByIdAndUpdate(req.user.id, { $set: update });
     const user = await User.findById(req.user.id).lean();
-    try {
-      mirrorUserToSqlite(user);
-    } catch (e) {
-      console.error('[syncUser] SQLite mirror failed:', e.message);
-    }
 
     res.json(formatUser(user));
   } catch (err) {
@@ -117,12 +77,6 @@ exports.updateProfile = async (req, res) => {
     const user = await User.findById(req.user.id).lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    try {
-      mirrorUserToSqlite(user);
-    } catch (e) {
-      console.error('[updateProfile] SQLite mirror failed:', e.message);
-    }
-
     res.json(formatUser(user));
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -133,26 +87,30 @@ exports.savePushToken = async (req, res) => {
   try {
     const normalizedPushToken = String(req.body?.pushToken || '').trim();
     if (!normalizedPushToken) return res.status(400).json({ message: 'Push token required' });
-
-    db.prepare('INSERT OR IGNORE INTO push_tokens (userId, token) VALUES (?, ?)').run(req.user.id, normalizedPushToken);
-    const sqliteCount = db.prepare('SELECT COUNT(1) as count FROM push_tokens WHERE userId = ?').get(req.user.id)?.count || 0;
-
-    try {
-      await PushToken.updateOne(
-        { userId: req.user.id, token: normalizedPushToken },
-        { $setOnInsert: { userId: req.user.id, token: normalizedPushToken } },
-        { upsert: true }
-      );
-    } catch (mongoErr) {
-      console.error('Push token Mongo save error:', mongoErr.message);
+    if (!isExpoPushToken(normalizedPushToken)) {
+      return res.status(400).json({ message: 'Invalid Expo push token format' });
     }
 
-    console.log(
-      `[Push] Token saved for user=${req.user.id} token=${normalizedPushToken.slice(0, 22)}... sqliteCount=${sqliteCount}`
+    // Keep token ownership single-user to avoid cross-account notification leaks
+    // when the same device signs into different accounts.
+    await PushToken.deleteMany({ token: normalizedPushToken, userId: { $ne: req.user.id } });
+
+    const result = await PushToken.updateOne(
+      { userId: req.user.id, token: normalizedPushToken },
+      { $setOnInsert: { userId: req.user.id, token: normalizedPushToken } },
+      { upsert: true }
     );
 
-    res.json({ message: 'Push token saved' });
+    console.log(
+      `[Push] Token saved for user=${req.user.id} token=${normalizedPushToken.slice(0, 22)}... upserted=${result.upsertedCount || 0} matched=${result.matchedCount || 0}`
+    );
+
+    res.json({
+      message: 'Push token saved',
+      created: (result.upsertedCount || 0) > 0,
+    });
   } catch (err) {
+    console.error('Push token save error:', err.message);
     res.status(500).json({ message: err.message });
   }
 };
@@ -162,16 +120,32 @@ exports.removePushToken = async (req, res) => {
     const normalizedPushToken = String(req.body?.pushToken || '').trim();
     if (!normalizedPushToken) return res.status(400).json({ message: 'Push token required' });
 
-    db.prepare('DELETE FROM push_tokens WHERE userId = ? AND token = ?').run(req.user.id, normalizedPushToken);
-
-    try {
-      await PushToken.deleteOne({ userId: req.user.id, token: normalizedPushToken });
-    } catch (mongoErr) {
-      console.error('Push token Mongo remove error:', mongoErr.message);
-    }
+    await PushToken.deleteOne({ userId: req.user.id, token: normalizedPushToken });
 
     res.json({ message: 'Push token removed' });
   } catch (err) {
+    console.error('Push token remove error:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.getMyPushTokens = async (req, res) => {
+  try {
+    const rows = await PushToken.find({ userId: req.user.id }, { token: 1, createdAt: 1, updatedAt: 1 })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    res.json({
+      count: rows.length,
+      items: rows.map((row) => ({
+        id: String(row._id),
+        tokenPreview: `${String(row.token || '').slice(0, 24)}...`,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      })),
+    });
+  } catch (err) {
+    console.error('Push token list error:', err.message);
     res.status(500).json({ message: err.message });
   }
 };

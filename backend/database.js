@@ -33,14 +33,6 @@ db.exec(`
     updatedAt TEXT DEFAULT (datetime('now'))
   );
 
-  CREATE TABLE IF NOT EXISTS push_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId TEXT NOT NULL,
-    token TEXT NOT NULL,
-    UNIQUE(userId, token),
-    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  );
-
   CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

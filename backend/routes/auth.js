@@ -10,6 +10,7 @@ router.post('/social-login', authController.socialLogin);
 router.post('/refresh-token', authController.refreshToken);
 router.get('/profile', auth, authController.getProfile);
 router.put('/profile', auth, upload.single('avatar'), authController.updateProfile);
+router.get('/push-token', auth, authController.getMyPushTokens);
 router.post('/push-token', auth, authController.savePushToken);
 router.delete('/push-token', auth, authController.removePushToken);
 

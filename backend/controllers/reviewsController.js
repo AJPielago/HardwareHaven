@@ -1,5 +1,7 @@
 const Review = require('../models/Review');
-const db = require('../database');
+const Order = require('../models/Order');
+const Product = require('../models/Product');
+const mongoose = require('mongoose');
 const { toId } = require('../utils/formatters');
 
 const PROFANITY_PATTERNS = [
@@ -25,11 +27,14 @@ const containsProfanity = (text) => {
 };
 
 const isDeliveredOrderStatus = (status) => String(status || '').toLowerCase() === 'delivered';
+const toObjectId = (value) => {
+  if (!mongoose.Types.ObjectId.isValid(String(value || ''))) return null;
+  return new mongoose.Types.ObjectId(String(value));
+};
 
 const updateProductRating = async (productId) => {
-  const normalizedProductId = String(productId);
   const stats = await Review.aggregate([
-    { $match: { productId: normalizedProductId } },
+    { $match: { productId: toObjectId(productId) } },
     {
       $group: {
         _id: '$productId',
@@ -41,9 +46,12 @@ const updateProductRating = async (productId) => {
 
   const numReviews = stats[0]?.numReviews || 0;
   const averageRating = stats[0]?.averageRating || 0;
-  db.prepare(
-    "UPDATE products SET numReviews = ?, averageRating = ?, updatedAt = datetime('now') WHERE id = ?"
-  ).run(numReviews, Math.round(averageRating * 10) / 10, normalizedProductId);
+  await Product.findByIdAndUpdate(productId, {
+    $set: {
+      numReviews,
+      averageRating: Math.round(averageRating * 10) / 10,
+    },
+  });
 };
 
 exports.getProductReviews = async (req, res) => {
@@ -78,8 +86,9 @@ exports.createReview = async (req, res) => {
   try {
     const { productId, orderId, rating, comment } = req.body;
     const normalizedProductId = String(productId || '').trim();
+    const productObjectId = toObjectId(normalizedProductId);
 
-    if (!normalizedProductId) return res.status(400).json({ message: 'Product is required' });
+    if (!normalizedProductId || !productObjectId) return res.status(400).json({ message: 'Product is required' });
     if (!comment || !String(comment).trim()) return res.status(400).json({ message: 'Comment is required' });
     if (containsProfanity(comment)) {
       return res.status(400).json({ message: 'Review contains prohibited language. Please revise your comment.' });
@@ -90,7 +99,7 @@ exports.createReview = async (req, res) => {
       return res.status(400).json({ message: 'Rating must be between 1 and 5' });
     }
 
-    const existingByProduct = await Review.findOne({ userId: req.user.id, productId: normalizedProductId }).lean();
+    const existingByProduct = await Review.findOne({ userId: req.user.id, productId: productObjectId }).lean();
     if (existingByProduct) {
       return res.status(409).json({
         message: 'You already reviewed this product. Please edit your existing review.',
@@ -98,46 +107,50 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    let verifiedOrderId = null;
+    let verifiedOrder = null;
     if (orderId) {
-      const selectedOrder = db.prepare(
-        'SELECT id, status FROM orders WHERE id = ? AND userId = ? LIMIT 1'
-      ).get(String(orderId), req.user.id);
+      const selectedOrderId = toObjectId(orderId);
+      if (!selectedOrderId) {
+        return res.status(400).json({ message: 'You can only review products from delivered orders' });
+      }
+
+      const selectedOrder = await Order.findOne({
+        _id: selectedOrderId,
+        userId: req.user.id,
+      }).lean();
+
       if (!selectedOrder || !isDeliveredOrderStatus(selectedOrder.status)) {
         return res.status(400).json({ message: 'You can only review products from delivered orders' });
       }
 
-      const selectedOrderItem = db.prepare(
-        'SELECT 1 as ok FROM order_items WHERE orderId = ? AND productId = ? LIMIT 1'
-      ).get(selectedOrder.id, normalizedProductId);
-      if (!selectedOrderItem?.ok) {
+      const selectedOrderItem = (selectedOrder.items || []).find(
+        (item) => toId(item.productId) === normalizedProductId
+      );
+      if (!selectedOrderItem) {
         return res.status(400).json({ message: 'Selected order does not contain this product' });
       }
 
-      verifiedOrderId = selectedOrder.id;
+      verifiedOrder = selectedOrder;
     } else {
-      const candidateOrder = db.prepare(`
-        SELECT o.id
-        FROM orders o
-        JOIN order_items oi ON oi.orderId = o.id
-        WHERE o.userId = ?
-          AND LOWER(o.status) = 'delivered'
-          AND oi.productId = ?
-        ORDER BY o.createdAt DESC
-        LIMIT 1
-      `).get(req.user.id, normalizedProductId);
+      const candidateOrder = await Order.findOne({
+        userId: req.user.id,
+        status: 'delivered',
+        'items.productId': productObjectId,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
 
-      if (!candidateOrder?.id) {
+      if (!candidateOrder?._id) {
         return res.status(400).json({ message: 'You can only review products from delivered orders' });
       }
 
-      verifiedOrderId = candidateOrder.id;
+      verifiedOrder = candidateOrder;
     }
 
     const created = await Review.create({
       userId: req.user.id,
-      productId: normalizedProductId,
-      orderId: verifiedOrderId,
+      productId: productObjectId,
+      orderId: verifiedOrder._id,
       rating: numericRating,
       comment: String(comment).trim(),
     });
@@ -184,18 +197,14 @@ exports.updateReview = async (req, res) => {
       return res.status(400).json({ message: 'Review contains prohibited language. Please revise your comment.' });
     }
 
-    const eligibleOrder = db.prepare(`
-      SELECT o.id
-      FROM orders o
-      JOIN order_items oi ON oi.orderId = o.id
-      WHERE o.id = ?
-        AND o.userId = ?
-        AND LOWER(o.status) = 'delivered'
-        AND oi.productId = ?
-      LIMIT 1
-    `).get(String(review.orderId), req.user.id, String(review.productId));
+    const eligibleOrder = await Order.findOne({
+      _id: review.orderId,
+      userId: req.user.id,
+      status: 'delivered',
+      'items.productId': review.productId,
+    }).lean();
 
-    if (!eligibleOrder?.id) {
+    if (!eligibleOrder?._id) {
       return res.status(403).json({ message: 'Review can only be edited for delivered-order purchases' });
     }
 
@@ -243,41 +252,25 @@ exports.deleteReview = async (req, res) => {
 exports.getMyReviews = async (req, res) => {
   try {
     const reviews = await Review.find({ userId: req.user.id })
+      .populate('productId', 'name image')
       .sort({ createdAt: -1 })
       .lean();
-
-    const productIds = [...new Set(reviews.map((r) => String(r.productId || '')).filter(Boolean))];
-    const productMap = new Map();
-    if (productIds.length) {
-      const placeholders = productIds.map(() => '?').join(', ');
-      const products = db.prepare(
-        `SELECT id, name, image FROM products WHERE id IN (${placeholders})`
-      ).all(...productIds);
-      for (const product of products) {
-        let image = product.image || '';
-        try {
-          const parsed = JSON.parse(product.image || '[]');
-          if (Array.isArray(parsed)) image = parsed[0] || '';
-        } catch {
-          image = product.image || '';
-        }
-        productMap.set(String(product.id), {
-          _id: String(product.id),
-          name: product.name,
-          image,
-        });
-      }
-    }
 
     const shaped = reviews.map((review) => ({
       _id: toId(review._id),
       rating: review.rating,
       comment: review.comment,
-      product: productMap.get(String(review.productId)) || {
-        _id: String(review.productId || ''),
-        name: undefined,
-        image: '',
-      },
+      product: review.productId
+        ? {
+            _id: toId(review.productId?._id || review.productId),
+            name: review.productId?.name,
+            image: review.productId?.image || '',
+          }
+        : {
+            _id: String(review.productId || ''),
+            name: undefined,
+            image: '',
+          },
       order: toId(review.orderId),
       user: toId(review.userId),
       createdAt: review.createdAt,
