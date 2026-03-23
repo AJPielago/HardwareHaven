@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ShopApp",
-    "owner": "alexj.p",
+    "owner": "chunmaru",
     "slug": "ShopApp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -21,6 +21,7 @@
       "bundleIdentifier": "com.shopapp.mobile"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -57,7 +58,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "f415cfa4-8eed-4377-bff9-c5a34a13721a"
+        "projectId": "0d106018-a03f-4f5d-b010-18a89fd355dd"
       }
     }
   }

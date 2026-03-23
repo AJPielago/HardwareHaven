@@ -43,8 +43,10 @@ function mirrorUserToSqlite(user) {
 exports.syncUser = async (req, res) => {
   try {
     const update = {};
+    const normalizedEmail = req.firebaseUser?.email ? String(req.firebaseUser.email).toLowerCase() : '';
 
     if (req.body.name) update.name = req.body.name;
+    if (normalizedEmail) update.email = normalizedEmail;
     if (req.body.phone) update.phone = req.body.phone;
     if (req.body.address) update.address = req.body.address;
     if (req.body.secondaryAddress) update.secondaryAddress = req.body.secondaryAddress;
@@ -129,16 +131,16 @@ exports.updateProfile = async (req, res) => {
 
 exports.savePushToken = async (req, res) => {
   try {
-    const { pushToken } = req.body;
-    if (!pushToken) return res.status(400).json({ message: 'Push token required' });
+    const normalizedPushToken = String(req.body?.pushToken || '').trim();
+    if (!normalizedPushToken) return res.status(400).json({ message: 'Push token required' });
 
-    db.prepare('INSERT OR IGNORE INTO push_tokens (userId, token) VALUES (?, ?)').run(req.user.id, pushToken);
+    db.prepare('INSERT OR IGNORE INTO push_tokens (userId, token) VALUES (?, ?)').run(req.user.id, normalizedPushToken);
     const sqliteCount = db.prepare('SELECT COUNT(1) as count FROM push_tokens WHERE userId = ?').get(req.user.id)?.count || 0;
 
     try {
       await PushToken.updateOne(
-        { userId: req.user.id, token: pushToken },
-        { $setOnInsert: { userId: req.user.id, token: pushToken } },
+        { userId: req.user.id, token: normalizedPushToken },
+        { $setOnInsert: { userId: req.user.id, token: normalizedPushToken } },
         { upsert: true }
       );
     } catch (mongoErr) {
@@ -146,7 +148,7 @@ exports.savePushToken = async (req, res) => {
     }
 
     console.log(
-      `[Push] Token saved for user=${req.user.id} token=${String(pushToken).slice(0, 22)}... sqliteCount=${sqliteCount}`
+      `[Push] Token saved for user=${req.user.id} token=${normalizedPushToken.slice(0, 22)}... sqliteCount=${sqliteCount}`
     );
 
     res.json({ message: 'Push token saved' });
@@ -157,11 +159,13 @@ exports.savePushToken = async (req, res) => {
 
 exports.removePushToken = async (req, res) => {
   try {
-    const { pushToken } = req.body;
-    db.prepare('DELETE FROM push_tokens WHERE userId = ? AND token = ?').run(req.user.id, pushToken);
+    const normalizedPushToken = String(req.body?.pushToken || '').trim();
+    if (!normalizedPushToken) return res.status(400).json({ message: 'Push token required' });
+
+    db.prepare('DELETE FROM push_tokens WHERE userId = ? AND token = ?').run(req.user.id, normalizedPushToken);
 
     try {
-      await PushToken.deleteOne({ userId: req.user.id, token: pushToken });
+      await PushToken.deleteOne({ userId: req.user.id, token: normalizedPushToken });
     } catch (mongoErr) {
       console.error('Push token Mongo remove error:', mongoErr.message);
     }

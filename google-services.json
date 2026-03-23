@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "865209207153",
+    "project_id": "expo-97519",
+    "storage_bucket": "expo-97519.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:865209207153:android:5bd2b42229b69839d14ed0",
+        "android_client_info": {
+          "package_name": "com.shopapp.mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "865209207153-tc98eobq0ujacjoi98n0m5qom7o5ipfe.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.shopapp.mobile",
+            "certificate_hash": "0f367a26f8318217ee3b1530a8f4e1a74b710cbc"
+          }
+        },
+        {
+          "client_id": "865209207153-b6l39ebgmjonvvstv56urequ5g507vfc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZia8sSTFSAEYLxWr9F8SzDwLPINkQF_g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "865209207153-95s5ijpg59a2ltkksbld2eh30etpoe09.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

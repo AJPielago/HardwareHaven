@@ -27,7 +27,11 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ message: 'Firebase token must contain an email' });
     }
 
-    let user = await User.findOne({ $or: [{ firebaseUid: decoded.uid }, { email: normalizedEmail }] });
+    const userByUid = await User.findOne({ firebaseUid: decoded.uid });
+    const userByEmail = await User.findOne({ email: normalizedEmail });
+
+    let user = userByUid || userByEmail;
+
     if (!user) {
       user = await User.create({
         firebaseUid: decoded.uid,
@@ -37,10 +41,38 @@ module.exports = async (req, res, next) => {
         provider: 'firebase',
         role: 'user',
       });
-    } else if (!user.firebaseUid) {
-      user.firebaseUid = decoded.uid;
-      user.provider = 'firebase';
-      await user.save();
+    } else {
+      let shouldSave = false;
+
+      // Connect existing account to Firebase UID when logging in via Google.
+      if (!user.firebaseUid || user.firebaseUid !== decoded.uid) {
+        user.firebaseUid = decoded.uid;
+        shouldSave = true;
+      }
+
+      if (user.email !== normalizedEmail) {
+        user.email = normalizedEmail;
+        shouldSave = true;
+      }
+
+      if (!user.name && decoded.name) {
+        user.name = decoded.name;
+        shouldSave = true;
+      }
+
+      if ((!user.avatar || user.avatar.trim() === '') && decoded.picture) {
+        user.avatar = decoded.picture;
+        shouldSave = true;
+      }
+
+      if (user.provider !== 'firebase') {
+        user.provider = 'firebase';
+        shouldSave = true;
+      }
+
+      if (shouldSave) {
+        await user.save();
+      }
     }
 
     if (user.isActive === false) {

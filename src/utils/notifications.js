@@ -19,6 +19,18 @@ if (Platform.OS !== 'web') {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const normalizePushToken = (value) => String(value || '').trim();
+
+const getExpoProjectId = () => {
+  return (
+    Constants?.easConfig?.projectId ||
+    Constants?.expoConfig?.extra?.eas?.projectId ||
+    Constants?.manifest2?.extra?.eas?.projectId ||
+    Constants?.manifest?.extra?.eas?.projectId ||
+    ''
+  );
+};
+
 async function waitForFirebaseUser(timeoutMs = 10000) {
   const startedAt = Date.now();
   while (!auth.currentUser && Date.now() - startedAt < timeoutMs) {
@@ -73,9 +85,18 @@ export async function registerForPushNotifications() {
         console.log('Push notification permission not granted');
         return null;
       }
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {})).data;
-      console.log('[Push] Expo token acquired:', token ? `${token.slice(0, 22)}...` : '(none)');
+      const projectId = getExpoProjectId();
+      if (!projectId) {
+        console.log('[Push] EAS projectId not found in Constants; attempting token request without explicit projectId');
+      }
+
+      token = (
+        await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {})
+      ).data;
+
+      const normalizedToken = normalizePushToken(token);
+      token = normalizedToken;
+      console.log('[Push] Expo token acquired:', normalizedToken ? `${normalizedToken.slice(0, 22)}...` : '(none)');
     } else {
       console.log('Must use physical device for push notifications');
     }
@@ -88,7 +109,8 @@ export async function registerForPushNotifications() {
 }
 
 export async function savePushToken(pushToken) {
-  if (!pushToken) {
+  const normalizedToken = normalizePushToken(pushToken);
+  if (!normalizedToken) {
     console.log('[Push] savePushToken skipped: no token provided');
     return false;
   }
@@ -100,7 +122,7 @@ export async function savePushToken(pushToken) {
   }
 
   try {
-    await api.post('/auth/push-token', { pushToken });
+    await api.post('/auth/push-token', { pushToken: normalizedToken });
     console.log('[Push] Token saved on backend');
     return true;
   } catch (err) {

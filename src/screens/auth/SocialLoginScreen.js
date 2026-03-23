@@ -159,6 +159,7 @@ function WebGoogleLogin({ exitSocialLogin }) {
       const action = await dispatch(
         webGoogleLogin({
           name: result.user.displayName,
+          email: result.user.email,
         })
       );
 

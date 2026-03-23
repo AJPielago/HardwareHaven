@@ -12,6 +12,24 @@ import api from '../../api/config';
 import { auth } from '../../services/firebase';
 import { appendImageToFormData } from '../../utils/formDataUpload';
 
+const toFallbackUserFromFirebase = (firebaseUser) => {
+  const email = firebaseUser?.email || '';
+  const fallbackNameFromEmail = email.includes('@') ? email.split('@')[0] : 'User';
+  return {
+    id: firebaseUser?.uid,
+    _id: firebaseUser?.uid,
+    name: firebaseUser?.displayName || fallbackNameFromEmail,
+    email,
+    avatar: firebaseUser?.photoURL || '',
+    phone: '',
+    address: '',
+    secondaryAddress: '',
+    provider: 'firebase',
+    role: 'user',
+    isActive: true,
+  };
+};
+
 const mapFirebaseAuthError = (err, fallbackMessage) => {
   const code = err?.code || '';
 
@@ -32,6 +50,18 @@ const mapFirebaseAuthError = (err, fallbackMessage) => {
   }
 
   return err?.response?.data?.message || err?.message || fallbackMessage;
+};
+
+const syncUserWithFirebaseToken = async ({ firebaseUser, syncPayload }) => {
+  if (!firebaseUser) {
+    throw new Error('Firebase user is missing. Please sign in again.');
+  }
+
+  const token = await firebaseUser.getIdToken(true);
+  const { data } = await api.post('/auth/sync', syncPayload, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data;
 };
 
 export const login = createAsyncThunk('auth/login', async ({ email, password }, { rejectWithValue }) => {
@@ -93,9 +123,13 @@ export const socialLogin = createAsyncThunk('auth/socialLogin', async (userData,
 
     const syncPayload = {
       name: userData.name || result.user.displayName || '',
+      email: userData.email || result.user.email || '',
     };
 
-    const { data } = await api.post('/auth/sync', syncPayload);
+    const data = await syncUserWithFirebaseToken({
+      firebaseUser: result.user,
+      syncPayload,
+    });
     return data;
   } catch (err) {
     console.log('[Social Login Error]', err.code, err.message, err.response?.status, err.response?.data);
@@ -110,9 +144,13 @@ export const webGoogleLogin = createAsyncThunk('auth/webGoogleLogin', async (use
     // We just need to sync with backend
     const syncPayload = {
       name: userData.name || '',
+      email: userData.email || '',
     };
 
-    const { data } = await api.post('/auth/sync', syncPayload);
+    const data = await syncUserWithFirebaseToken({
+      firebaseUser: auth.currentUser,
+      syncPayload,
+    });
     return data;
   } catch (err) {
     console.log('[Web Google Login Error]', err.code, err.message, err.response?.status, err.response?.data);
@@ -167,26 +205,75 @@ export const logout = createAsyncThunk('auth/logout', async () => {
 export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWithValue }) => {
   try {
     console.log('[CheckAuth] Starting auth state check...');
+    const withTimeout = (promise, ms, message) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+      ]);
+
     // Wait for auth state to be ready (works on both web and native)
-    await new Promise((resolve) => {
-      const unsubscribe = auth.onAuthStateChanged((user) => {
-        console.log('[CheckAuth] onAuthStateChanged fired, user:', user ? 'EXISTS' : 'NULL');
-        unsubscribe();
-        resolve(user);
-      });
-    });
+    try {
+      await withTimeout(new Promise((resolve) => {
+        const unsubscribe = auth.onAuthStateChanged((user) => {
+          console.log('[CheckAuth] onAuthStateChanged fired, user:', user ? 'EXISTS' : 'NULL');
+          unsubscribe();
+          resolve(user);
+        });
+      }), 10000, 'Timed out waiting for Firebase auth state');
+    } catch (authStateErr) {
+      // If Firebase already has a current user, proceed rather than blocking app entry.
+      if (!auth.currentUser) {
+        throw authStateErr;
+      }
+      console.warn('[CheckAuth] Auth state listener timed out, using currentUser fallback');
+    }
     
     if (!auth.currentUser) {
       console.log('[CheckAuth] No Firebase user found');
       return rejectWithValue('No Firebase user');
     }
+
+    const firebaseUser = auth.currentUser;
+    const fallbackUser = toFallbackUserFromFirebase(firebaseUser);
+
     console.log('[CheckAuth] Firebase user exists, calling /auth/profile...');
-    const { data } = await api.get('/auth/profile');
-    console.log('[CheckAuth] Profile fetched successfully');
-    return data;
+    try {
+      const { data } = await withTimeout(
+        api.get('/auth/profile'),
+        15000,
+        'Timed out fetching /auth/profile'
+      );
+      console.log('[CheckAuth] Profile fetched successfully');
+      return data;
+    } catch (profileErr) {
+      console.warn('[CheckAuth] /auth/profile failed, trying /auth/sync and retry...', profileErr?.message);
+      try {
+        const syncPayload = {};
+        if (firebaseUser.displayName) syncPayload.name = firebaseUser.displayName;
+
+        await withTimeout(
+          api.post('/auth/sync', syncPayload),
+          10000,
+          'Timed out posting /auth/sync'
+        );
+
+        const { data } = await withTimeout(
+          api.get('/auth/profile'),
+          10000,
+          'Timed out fetching /auth/profile after sync'
+        );
+
+        console.log('[CheckAuth] Profile fetched successfully after /auth/sync');
+        return data;
+      } catch (syncErr) {
+        // Keep users inside the app when Firebase session is valid but backend is unavailable.
+        console.warn('[CheckAuth] Backend unavailable during startup, using Firebase fallback user:', syncErr?.message);
+        return fallbackUser;
+      }
+    }
   } catch (err) {
     console.error('[CheckAuth Error]', err);
-    return rejectWithValue('Auth check failed');
+    return rejectWithValue(err?.message || 'Auth check failed');
   }
 });
 
@@ -218,8 +305,8 @@ const authSlice = createSlice({
       .addCase(getProfile.fulfilled, (state, action) => { state.user = action.payload; })
       .addCase(updateProfile.fulfilled, (state, action) => { state.user = action.payload; })
       .addCase(logout.fulfilled, (state) => { state.user = null; state.isAuthenticated = false; })
-      .addCase(checkAuth.fulfilled, (state, action) => { state.user = action.payload; state.isAuthenticated = true; state.loading = false; })
-      .addCase(checkAuth.rejected, (state) => { state.isAuthenticated = false; state.loading = false; })
+      .addCase(checkAuth.fulfilled, (state, action) => { state.user = action.payload; state.isAuthenticated = true; state.loading = false; state.error = null; })
+      .addCase(checkAuth.rejected, (state, action) => { state.isAuthenticated = false; state.loading = false; state.error = action.payload || null; })
       .addCase(checkAuth.pending, (state) => { state.loading = true; });
   },
 });
