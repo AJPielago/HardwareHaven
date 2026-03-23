@@ -90,28 +90,9 @@ export async function registerForPushNotifications() {
         console.log('[Push] EAS projectId not found in Constants; attempting token request without explicit projectId');
       }
 
-      // Retry getting the Expo push token with back-off to allow native
-      // FirebaseApp to finish initialization on cold start.
-      const maxTokenAttempts = 3;
-      for (let i = 1; i <= maxTokenAttempts; i++) {
-        try {
-          token = (
-            await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {})
-          ).data;
-          break; // success
-        } catch (tokenErr) {
-          const isFirebaseNotReady =
-            tokenErr?.message?.includes('FirebaseApp is not initialized') ||
-            tokenErr?.message?.includes('Default FirebaseApp') ||
-            tokenErr?.message?.includes('MISSING_INSTANCEID_SERVICE');
-          if (isFirebaseNotReady && i < maxTokenAttempts) {
-            console.log(`[Push] Native Firebase not ready yet, waiting ${i * 3}s before retry (${i}/${maxTokenAttempts})...`);
-            await sleep(i * 3000);
-          } else {
-            throw tokenErr; // not a Firebase init issue or last attempt
-          }
-        }
-      }
+      token = (
+        await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {})
+      ).data;
 
       const normalizedToken = normalizePushToken(token);
       token = normalizedToken;
@@ -153,14 +134,6 @@ export async function savePushToken(pushToken) {
 export async function ensurePushTokenSaved(maxAttempts = 3) {
   if (Platform.OS === 'web') return false;
 
-  // Give native Firebase SDK time to initialize on cold start before
-  // first attempt.  FirebaseApp.initializeApp runs in MainApplication.onCreate
-  // but may not have finished by the time JS is ready.
-  if (Platform.OS === 'android') {
-    console.log('[Push] Waiting 5s for native Firebase SDK to initialize...');
-    await sleep(5000);
-  }
-
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const token = await registerForPushNotifications();
     if (!token) {
@@ -171,8 +144,7 @@ export async function ensurePushTokenSaved(maxAttempts = 3) {
     }
 
     if (attempt < maxAttempts) {
-      // Progressively longer waits: 3s, 6s
-      await sleep(attempt * 3000);
+      await sleep(attempt * 2000);
     }
   }
 
