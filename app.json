@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ShopApp",
-    "owner": "chunmaru",
+    "owner": "adi_10",
     "slug": "ShopApp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -59,8 +59,18 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "0d106018-a03f-4f5d-b010-18a89fd355dd"
-      }
+        "projectId": "3998001b-225e-4805-9b55-f92bb933193c"
+      },
+      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyA-l185FMGgCrhnz2CtQmFusIZxPyVCyjs",
+      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "expo-97519.firebaseapp.com",
+      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "expo-97519",
+      "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "expo-97519.firebasestorage.app",
+      "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "865209207153",
+      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:865209207153:web:8cda09eaa3328f9cd14ed0",
+      "EXPO_PUBLIC_API_URL": "https://shopapp-backend-27yn.onrender.com/api",
+      "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "865209207153-95s5ijpg59a2ltkksbld2eh30etpoe09.apps.googleusercontent.com",
+      "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "865209207153-tc98eobq0ujacjoi98n0m5qom7o5ipfe.apps.googleusercontent.com",
+      "EXPO_PUBLIC_EXPO_PROJECT_FULL_NAME": "@adi_10/ShopApp"
     }
   }
 }

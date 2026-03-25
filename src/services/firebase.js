@@ -37,7 +37,7 @@ const missingFirebaseKeys = requiredFirebaseKeys.filter((key) => !firebaseConfig
 if (missingFirebaseKeys.length) {
   throw new Error(
     `Missing Firebase client config: ${missingFirebaseKeys.join(', ')}. ` +
-      'Add EXPO_PUBLIC_FIREBASE_* keys to your app root .env or .env.local and restart Expo with cache clear (npx expo start -c).'
+    'Add EXPO_PUBLIC_FIREBASE_* keys to your app root .env or .env.local and restart Expo with cache clear (npx expo start -c).'
   );
 }
 
@@ -51,10 +51,8 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 let auth;
 if (Platform.OS === 'web') {
-  // On web, use getAuth() - browser persistence is default
   auth = getAuth(app);
 } else {
-  // On native, use React Native persistence
   try {
     auth = initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage),

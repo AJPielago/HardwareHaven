@@ -46,3 +46,7 @@ backend/.env
 
 # Local Android package
 app.apk
+
+# Secrets / credentials
+credentials.json
+service-account-key.json

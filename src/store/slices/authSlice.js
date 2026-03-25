@@ -202,7 +202,7 @@ export const logout = createAsyncThunk('auth/logout', async () => {
   await signOut(auth);
 });
 
-export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWithValue }) => {
+export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWithValue, dispatch }) => {
   try {
     console.log('[CheckAuth] Starting auth state check...');
     const withTimeout = (promise, ms, message) =>
@@ -281,6 +281,23 @@ export const checkAuth = createAsyncThunk('auth/checkAuth', async (_, { rejectWi
       } catch (syncErr) {
         // Keep users inside the app when Firebase session is valid but backend is unavailable.
         console.warn('[CheckAuth] Backend unavailable during startup, using Firebase fallback user:', syncErr?.message);
+
+        // Background retry: once the backend wakes up, fetch the real profile
+        // so the admin role (and other fields) get restored.
+        const retryGetProfile = async (attempt = 1) => {
+          if (attempt > 5) return;
+          const delay = attempt * 5000; // 5s, 10s, 15s, 20s, 25s
+          await new Promise((r) => setTimeout(r, delay));
+          try {
+            await dispatch(getProfile()).unwrap();
+            console.log('[CheckAuth] Background profile refresh succeeded on attempt', attempt);
+          } catch {
+            console.warn('[CheckAuth] Background profile refresh attempt', attempt, 'failed, retrying...');
+            retryGetProfile(attempt + 1);
+          }
+        };
+        retryGetProfile();
+
         return fallbackUser;
       }
     }

@@ -143,108 +143,111 @@ export default function DrawerNavigator() {
           drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="cart" style={{ backgroundColor: 'transparent' }} color={color} />,
         }}
       />
-      {user?.role === 'admin' && (
-        <>
-          <Drawer.Screen
-            name="AdminDashboard"
-            options={{
-              title: 'Dashboard',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="view-dashboard" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminDashboardScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="AdminOrders"
-            options={{
-              title: 'Manage Orders',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="clipboard-list" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminOrdersScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="SendPromotion"
-            options={{
-              title: 'Send Promotion',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="sale" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <SendPromotionScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="AdminInventory"
-            options={{
-              title: 'Inventory',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="warehouse" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminInventoryScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="AdminUsers"
-            options={{
-              title: 'Users',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="account-group" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminUsersScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="AdminReviews"
-            options={{
-              title: 'Reviews',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="message-draw" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminReviewsScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-          <Drawer.Screen
-            name="AdminReports"
-            options={{
-              title: 'Reports',
-              headerShown: true,
-              drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="file-chart" style={{ backgroundColor: 'transparent' }} color={color} />,
-            }}
-          >
-            {(props) => (
-              <AdminOnlyGuard navigation={props.navigation}>
-                <AdminReportsScreen {...props} />
-              </AdminOnlyGuard>
-            )}
-          </Drawer.Screen>
-        </>
-      )}
+      <Drawer.Screen
+        name="AdminDashboard"
+        options={{
+          title: 'Dashboard',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="view-dashboard" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminDashboardScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="AdminOrders"
+        options={{
+          title: 'Manage Orders',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="clipboard-list" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminOrdersScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="SendPromotion"
+        options={{
+          title: 'Send Promotion',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="sale" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <SendPromotionScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="AdminInventory"
+        options={{
+          title: 'Inventory',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="warehouse" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminInventoryScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="AdminUsers"
+        options={{
+          title: 'Users',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="account-group" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminUsersScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="AdminReviews"
+        options={{
+          title: 'Reviews',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="message-draw" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminReviewsScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="AdminReports"
+        options={{
+          title: 'Reports',
+          headerShown: true,
+          drawerItemStyle: user?.role !== 'admin' ? { display: 'none' } : undefined,
+          drawerIcon: ({ color, size }) => <Avatar.Icon size={size} icon="file-chart" style={{ backgroundColor: 'transparent' }} color={color} />,
+        }}
+      >
+        {(props) => (
+          <AdminOnlyGuard navigation={props.navigation}>
+            <AdminReportsScreen {...props} />
+          </AdminOnlyGuard>
+        )}
+      </Drawer.Screen>
     </Drawer.Navigator>
   );
 }
